@@ -1,4 +1,4 @@
-﻿<#
+<#
 
     description: Update Nextcloud Client
     author: flo.alt@fa-netz.de
@@ -8,23 +8,27 @@ before runnin this script: download nextcloud setup file and store it in a path 
 
 #>
 
+
+## getting script name & path and reading variables from config file:
+
+    $scriptpath = (Split-Path -parent $PSCommandPath)
+    $scriptname = $MyInvocation.MyCommand.Name
+    $scriptfullpath = $scriptpath + "\" + $scriptname
+
+
+
 ### -------- setup --------
+    
+# settings for invoke-scriptupdate
+    $scriptsrc = "https://raw.githubusercontent.com/floalt/Software-Deployment/main/keepass-download.ps1"  ### URL ist falsch!
 
-$app_name = "Nextcloud Client"
-$search_name = "Nextcloud"
-$deploypath = "\\serv12-dc\deployment\nextcloud\"
-$setup_param_exe = "/S"
-$setup_param_msi = "REBOOT=ReallySuppress"
-
-$setup_file = ""
-$setup_version = ""
-$setup = ""
-
-$logpath = "\\serv12-dc\deployment\logs\nextcloud\"
-$logname = "ncupdate"
+# load config file
+    . $scriptpath\update-nextcloud.config.ps1
 
 
 ###   -------- finish setup --------
+
+
 
 
 ###   -------- functions --------
@@ -32,37 +36,37 @@ $logname = "ncupdate"
 
 # basic functions
 
-function start-logfile {
+    function start-logfile {
 
-    $script:log_tempfile =  "C:\" + $logname + "_log_tempfile" + ".log"
-    $script:log_okfile = $logpath + "ok_" + $env:COMPUTERNAME + ".log"
-    $script:log_errorfile = $logpath + "fail_" + $env:COMPUTERNAME + ".log"
-    "Beginning: $(Get-Date -Format yyyy-MM-dd_HH:mm:ss)" >> $log_tempfile
-}
-
-function end-logfile {
-
-    "End: $(Get-Date -Format yyyy-MM-dd_HH:mm:ss)" >> $log_tempfile
-    
-    if ($errorcount -eq 0) {
-        mv $log_tempfile $log_okfile -Force
-        if (test-path $log_errorfile) {rm $log_errorfile -Force}
-
-    } else {
-        mv $log_tempfile $log_errorfile -Force
-        if (test-path $log_okfile) {rm $log_okfile -Force}
+        $script:log_tempfile =  "C:\" + $logname + "_log_tempfile" + ".log"
+        $script:log_okfile = $logpath + "ok_" + $env:COMPUTERNAME + ".log"
+        $script:log_errorfile = $logpath + "fail_" + $env:COMPUTERNAME + ".log"
+        "Beginning: $(Get-Date -Format yyyy-MM-dd_HH:mm:ss)" >> $log_tempfile
     }
-}
 
-function errorcheck {
+    function end-logfile {
 
-    if ($?) {
-        $yeah >> $log_tempfile
-    } else {
-        $shit >> $log_tempfile
-        $script:errorcount = $script:errorcount + 1
+        "End: $(Get-Date -Format yyyy-MM-dd_HH:mm:ss)" >> $log_tempfile
+        
+        if ($errorcount -eq 0) {
+            mv $log_tempfile $log_okfile -Force
+            if (test-path $log_errorfile) {rm $log_errorfile -Force}
+
+        } else {
+            mv $log_tempfile $log_errorfile -Force
+            if (test-path $log_okfile) {rm $log_okfile -Force}
+        }
     }
-}
+
+    function errorcheck {
+
+        if ($?) {
+            $yeah >> $log_tempfile
+        } else {
+            $shit >> $log_tempfile
+            $script:errorcount = $script:errorcount + 1
+        }
+    }
 
 
 
@@ -82,31 +86,16 @@ function get-version-app {
         if (!$version) {
             $version = (Get-Package -Provider Programs | where {$_.Name -like "*$search_name*"}).Version
         }
+    
+    # convert to Version-Type and set build to "0"
+        if ($version) {
+            $version = [version]$version
+            $version = New-Object System.Version($version.Major, $version.Minor, $version.Build, 0)
+        }
 
     return $version
 }
 
-
-# convert version-variable
-
-function convert-version ($version) {
-
-    if (($version.GetType()).Name -eq "String") {
-        echo "This is a string"
-        $version_str = $version
-
-    } elseif (($version.GetType()).Name -eq "Version") {
-        echo "This is a version, converting to string"
-        $version_str = $version.ToString()
-
-    } else {
-        echo "FAIL: This is not a string or a version"
-    }
-
-    $version_short = '{0}.{1}.{2}' -f $version_str.split('.')
-        
-    return $version_short
-}
 
 
 # install the desired app
@@ -116,7 +105,7 @@ function install-app {
     "OK: Starting installation of $app_name..." >> $log_tempfile
     $ext = (Get-Item $setup).extension
         
-    $yeah = "OK: Starting to install $app_name $setup_version successfully."
+    $yeah = "OK: Starting to install $app_name $setup_version."
     $shit = "FAIL: Installing $app_name ver $setup_version failed"
     
     # installing exe file
@@ -156,12 +145,8 @@ function install-app {
 
 function errorcheck-app {
     
-    $installed_version = (get-version-app)
+    $installed_version = get-version-app
     
-    if ($installed_version) {
-        $installed_version = (convert-version $installed_version)[1]
-    }
-
     if ($installed_version -eq $setup_version) {
         "OK: $app_name ver $setup_version is installed successfully." >> $log_tempfile
     } else {
@@ -171,16 +156,34 @@ function errorcheck-app {
     }
 }
 
+
+# update this scrip itself by Github source
+
+function start-scriptupdate {
+
+    if ($autoupdate -eq 1) {
+        $yeah="OK: Self-Update of this script successful"
+        $shit="FAIL: Self-Update of this script failed"
+        Invoke-WebRequest -Uri $scriptsrc -OutFile $scriptfullpath; errorcheck
+    }
+
+}
+
+
 ###   -------- finish functions --------
 
 
 
 ###   -------- start the action --------
 
-# "$(Get-Date -Format yyyy-MM-dd_HH:mm:ss)" > $logpath\touchtest.txt
 
 $errorcount = 0
 $instfail = 0
+
+## activate TLS 1.1 and TLS 1.2
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]'Tls11,Tls12'
+
 
 # begin logfile:
 
@@ -200,7 +203,7 @@ $instfail = 0
     
     if ($setup_fileinfo.VersionInfo.FileVersion) {
         
-        $setup_version = (convert-version ($setup_fileinfo.VersionInfo.FileVersion))[1]
+        $setup_version = [Version]$setup_fileinfo.VersionInfo.FileVersion
     
     } else {
     
@@ -208,7 +211,9 @@ $instfail = 0
 
         "INFO: There is no version-info within the setup file. Reading from version-file..." >> $log_tempfile
         $version_file = $deploypath + $setup_fileinfo.BaseName + ".version"
-        $setup_version = cat $version_file
+        $setup_version = [Version](cat $version_file)
+        $setup_version = New-Object System.Version($setup_version.Major, $setup_version.Minor, $setup_version.Build, 0)
+
     }
 
     "INFO: setup file version is $setup_version" >> $log_tempfile
@@ -216,13 +221,9 @@ $instfail = 0
 
 # get version from installed app
 
-    $installed_version = (get-version-app)
-    
-    if ($installed_version) {
+    $installed_version = get-version-app
+    if ($installed_version) {"INFO: $app_name version already installed is $installed_version" >> $log_tempfile}
 
-        $installed_version = (convert-version $installed_version)[1]
-        "INFO: $app_name version already installed is $installed_version" >> $log_tempfile
-    }
 
 
 # perform the action
@@ -277,4 +278,5 @@ $instfail = 0
 
 # end of script
 
+    start-scriptupdate
     end-logfile
